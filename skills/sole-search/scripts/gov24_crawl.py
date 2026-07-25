@@ -122,15 +122,47 @@ def _open_validated(url, timeout):
     raise RedirectBlocked("리다이렉트 홉 초과")
 
 
+def _variant_regex_src(v):
+    """키 변형 1개를 정규식 소스로 — %XX의 헥사는 **대·소문자 무관**으로 매칭한다.
+    서버가 %2b/%2B를 섞어 반사해도(A%2bB) 잡는다(KIPRIS·ir 리댁터와 동일 처리)."""
+    out, i, n = [], 0, len(v)
+    while i < n:
+        if v[i] == "%" and i + 2 < n and re.fullmatch(r"[0-9A-Fa-f]{2}", v[i + 1:i + 3]):
+            out.append("%")
+            for ch in (v[i + 1], v[i + 2]):
+                out.append(f"[{ch.lower()}{ch.upper()}]" if ch.isalpha() else re.escape(ch))
+            i += 3
+        else:
+            out.append(re.escape(v[i]))
+            i += 1
+    return "".join(out)
+
+
 def _redact(msg, key):
-    """에러 메시지에서 serviceKey(및 인코딩 변형)를 지운다 — 키가 예외 문자열의
-    URL로 새어 로그에 남지 않게."""
+    """에러 메시지에서 serviceKey(및 인코딩/디코딩 변형)를 지운다 — 키가 예외
+    문자열의 URL·서버 반사(resultMsg)로 새어 로그에 남지 않게.
+
+    - 이미 인코딩된('%2B') 키를 서버가 디코딩해 되비추면(A%2BB → A+B)
+      unquote/unquote_plus 변형으로 잡는다.
+    - 서버가 %XX를 대·소문자 섞어 반사해도(A%2bB) 대소문자 무관 정규식으로 잡는다.
+    KIPRIS·ir 리댁터와 동일한 강도로 정합시킨다."""
     s = str(msg)
-    for v in {key, encode_key(key), urllib.parse.quote(key, safe=""),
-              urllib.parse.quote_plus(key)}:
-        if v:
-            s = s.replace(v, "[REDACTED]")
-    return s
+    if not key:
+        return s
+    variants = {key, encode_key(key), urllib.parse.quote(key, safe=""),
+                urllib.parse.quote_plus(key)}
+    for dec in (urllib.parse.unquote, urllib.parse.unquote_plus):
+        try:
+            variants.add(dec(key))
+        except Exception:  # noqa: BLE001 — 마스킹은 best-effort, 예외 전파 금지
+            pass
+    variants = [v for v in variants if v]
+    if not variants:
+        return s
+    # 긴 변형 먼저(더 구체적인 매칭 우선) — %XX는 대소문자 무관
+    src = "|".join(_variant_regex_src(v)
+                   for v in sorted(variants, key=len, reverse=True))
+    return re.sub(src, "[REDACTED]", s)
 
 
 def pick(rec, keys):
@@ -206,7 +238,9 @@ def api_get(path, key, params):
                 payload = json.loads(resp.read().decode("utf-8", "replace"))
             code = payload.get("code")
             if code in (-401, 401):
-                raise PermissionError(f"인증 실패: {payload.get('msg')}")
+                # payload.msg는 서버 반사 문자열 — 키를 되비출 수 있어 마스킹한다
+                # (키는 어떤 경로로도 로그·예외에 노출 금지).
+                raise PermissionError(f"인증 실패: {_redact(payload.get('msg'), key)}")
             return payload
         except RedirectBlocked:
             raise  # 외부 호스트 유출 시도 — 재시도 없이 즉시 실패
@@ -280,6 +314,7 @@ def match_target(record, needle):
 
 def cmd_list(args, key):
     page, total, collected, matched, raw_fetched = 1, None, {}, 0, 0
+    invalid = 0  # to_record가 None을 낸 행(식별자/서비스명 누락) 누계
     max_pages = getattr(args, "max_pages", None)
     while True:
         payload = api_get("serviceList", key, {"page": page, "perPage": PER_PAGE,
@@ -311,6 +346,9 @@ def cmd_list(args, key):
         for raw in data:
             rec = to_record(raw)
             if rec is None:
+                # 정규화 실패 행 — filter-target 모드에선 매칭 대상이었을 수도 있는데
+                # 조용히 사라지면 exit 0으로 위장된다. 누계를 세어 끝에서 partial 처리.
+                invalid += 1
                 continue
             if args.filter_target and not match_target(rec, args.filter_target):
                 continue
@@ -336,6 +374,13 @@ def cmd_list(args, key):
     print(f"TOTAL {total} COLLECTED {len(collected)}{extra}", file=sys.stderr)
     if max_pages:
         return 0  # smoke: 첫 페이지 계약(식별자·필드) 검증만 — coverage 생략
+    # 정규화 실패 행이 있으면(식별자/서비스명 누락) 매칭 대상이 조용히 사라졌을 수
+    # 있다 — filter-target 모드에서 len(collected)<total 검사가 생략되므로 여기서
+    # 명시적으로 partial 처리한다(Codex #13).
+    if invalid:
+        print(f"WARNING gov24: 정규화 실패(식별자/서비스명 누락) {invalid}건 — "
+              "partial (일부 레코드 유실 가능)", file=sys.stderr)
+        return 2
     # 수집률 검증은 필터 전 원시 수신 건수로 — --filter-target 모드에서도 적용
     if total and raw_fetched < total:
         print(f"WARNING gov24: 총 {total} 대비 원시 수신 {raw_fetched}건 — partial",

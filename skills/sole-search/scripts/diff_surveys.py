@@ -53,6 +53,22 @@ SKIP_FILES = {"screening.jsonl", "new_items.jsonl"}
 SKIP_PREFIXES = ("screen", "verdicts", "judge_input", "merged", "new_items")
 
 
+# 승계 판정에 필수인 핵심 프로필 축 — 하나라도 비면 승계 무효(Codex #14).
+# 사업자유형·업종·지역은 소상공인 지원 판정의 결정 축이다. 종전 계약은 이 축을
+# any(하나라도 있으면 통과)로 봤으나, 이제 ALL(전부 있어야 승계)로 강화한다.
+SOLE_MANDATORY = ["entity_type", "industry_text", "province"]
+
+
+def _reject_dup_keys(pairs):
+    """object_pairs_hook — 한 레코드에 중복 키가 있으면 거부(Codex #12)."""
+    d = {}
+    for k, v in pairs:
+        if k in d:
+            raise ValueError(f"중복 JSON 키: {k!r}")
+        d[k] = v
+    return d
+
+
 def load_dir(path):
     """원시 수집 jsonl만 로드. 스키마 위반·중복 키는 즉시 실패한다 (fail-closed)."""
     records = {}
@@ -65,7 +81,11 @@ def load_dir(path):
             line = line.strip()
             if not line:
                 continue
-            r = json.loads(line)
+            try:
+                r = json.loads(line, object_pairs_hook=_reject_dup_keys)
+            except (json.JSONDecodeError, ValueError) as e:
+                print(f"ERROR: {f}:{ln} JSON 파손/중복 키 — {e}", file=sys.stderr)
+                sys.exit(1)
             if "kind" in r and "record" in r:
                 continue  # 이전 diff 산출물 혼입 방어
             if "screening" in r and "title" not in r:
@@ -101,6 +121,11 @@ def classify(old, new):
     if old_h and not new_h:
         # 목록 필드는 동일하지만 새 조사에 해시가 없다 — 상세 재수집 후 재분류해야 한다
         return {"kind": "NEEDS_REHASH", "changed_fields": []}
+    if new_h and not old_h:
+        # 직전엔 해시가 없었는데 이번에 상세를 처음 수집했다 — 직전 판정이 상세
+        # 없이 내려졌을 수 있어 1회 재검토(Codex #6).
+        return {"kind": "CHANGED",
+                "changed_fields": ["content_hash(최초 상세수집 — 재검토)"]}
     return {"kind": "UNCHANGED", "changed_fields": []}
 
 
@@ -167,12 +192,15 @@ def main():
         new_fields = parse_profile_frontmatter(args.new_profile)
         # 판정 필드가 하나도 없는(잘린) 프로필은 파싱 실패와 같다 — 빈 프로필 두 개가
         # "동일 fingerprint"로 승계를 통과하면 안 된다 (fail-closed)
-        old_axes = any(old_fields.get(k) for k in PROFILE_FIELDS)
-        new_axes = any(new_fields.get(k) for k in PROFILE_FIELDS)
+        # 핵심 판정 축(SOLE_MANDATORY)은 하나라도 비면 승계 근거가 불완전하다 —
+        # any가 아니라 ALL을 요구한다(Codex #14).
+        old_axes = all(old_fields.get(k) for k in SOLE_MANDATORY)
+        new_axes = all(new_fields.get(k) for k in SOLE_MANDATORY)
         if not old_fields or not new_fields or not old_axes or not new_axes:
-            invalidate = True  # fail-closed: 프로필을 못 읽으면 승계하지 않는다
-            print("WARNING: 프로필 파일을 읽지 못했거나 판정 필드가 비어 있다 — "
-                  "승계 무효(fail-closed), 전체 재검토", file=sys.stderr)
+            invalidate = True  # fail-closed: 프로필이 불완전하면 승계하지 않는다
+            print("WARNING: 프로필 파일을 읽지 못했거나 핵심 판정 축(사업자유형·"
+                  "업종·지역)이 하나라도 비어 있다 — 승계 무효(fail-closed), "
+                  "전체 재검토", file=sys.stderr)
         elif not carryover_valid(profile_fingerprint(old_fields),
                                  profile_fingerprint(new_fields)):
             invalidate = True

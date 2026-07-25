@@ -154,3 +154,27 @@ def test_same_profile_with_axes_keeps_carryover(diff, monkeypatch, dirs, tmp_pat
                     extra=["--old-profile", str(p_old),
                            "--new-profile", str(p_new)]) == 0
     assert out.read_text() == ""  # UNCHANGED — 승계 유지
+
+
+def test_first_hash_appearance_is_changed(diff, monkeypatch, dirs, tmp_path):
+    """직전엔 해시가 없다가 이번에 상세를 처음 수집(해시 등장) → UNCHANGED가 아니라
+    CHANGED로 1회 재검토(Codex #6)."""
+    old, new = dirs
+    write_jsonl(old / "bizinfo.jsonl", [rec()])  # 해시 없음
+    write_jsonl(new / "bizinfo.jsonl", [rec(content_hash="new", hash_version=2)])
+    out = tmp_path / "out.jsonl"
+    assert run_diff(diff, monkeypatch, old, new, out) == 0
+    rows = [json.loads(l) for l in out.read_text().splitlines()]
+    assert [r["kind"] for r in rows] == ["CHANGED"]
+    assert any("최초 상세수집" in c for c in rows[0]["changed_fields"])
+
+
+def test_duplicate_json_keys_rejected(diff, monkeypatch, dirs, tmp_path):
+    """레코드 한 줄에 중복 키가 있으면(위조 필드) 즉시 실패(Codex #12)."""
+    old, new = dirs
+    write_jsonl(old / "bizinfo.jsonl", [rec()])
+    (new / "bizinfo.jsonl").write_text(
+        '{"source":"bizinfo","source_id":"PBLN_1","source_id":"HACK",'
+        '"title":"x","status":"접수중"}\n', encoding="utf-8")
+    out = tmp_path / "out.jsonl"
+    assert run_diff(diff, monkeypatch, old, new, out) == 1

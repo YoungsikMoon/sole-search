@@ -49,3 +49,41 @@ def test_unsupported_writes_failed_json_and_preserves_stale(attach, tmp_path,
 
 def test_missing_file(attach):
     assert attach.extract("/nonexistent/x.pdf")["reason"] == "file_not_found"
+
+
+# ---- #11 위조 HWPX(구조 마커 없음) 거부 ----
+def test_forged_zip_without_hwpx_markers_fails(attach, tmp_path):
+    """임의 zip에 Contents/section0.xml만 넣은 위조 첨부는 정품 HWPX로 완전
+    추출됐다고 인정하지 않는다(Codex #11)."""
+    p = tmp_path / "forged.hwpx"
+    with zipfile.ZipFile(p, "w") as z:  # mimetype/version.xml/container 없음
+        z.writestr("Contents/section0.xml",
+                   '<hp:p xmlns:hp="urn:hwpx"><hp:t>가짜 자격</hp:t></hp:p>')
+    r = attach.extract(str(p))
+    assert r["ok"] is False and r["reason"] == "hwpx_unverified_container"
+
+
+def test_bad_mimetype_hwpx_fails(attach, tmp_path):
+    p = tmp_path / "bad.hwpx"
+    with zipfile.ZipFile(p, "w") as z:
+        z.writestr("mimetype", "application/zip")  # 잘못된 mimetype
+        z.writestr("Contents/section0.xml",
+                   '<hp:p xmlns:hp="urn:hwpx"><hp:t>x</hp:t></hp:p>')
+    r = attach.extract(str(p))
+    assert r["ok"] is False and r["reason"] == "hwpx_bad_mimetype"
+
+
+# ---- #16 심링크 출력 경로 거부 ----
+def test_symlink_output_refused(attach, tmp_path):
+    import os
+    import subprocess
+    import sys
+    make_hwpx(tmp_path / "n.hwpx")
+    victim = tmp_path / "victim.txt"
+    victim.write_text("소중한 원본", encoding="utf-8")
+    link = tmp_path / "out.txt"
+    os.symlink(victim, link)  # out.txt -> victim.txt (덮어쓰기 유도)
+    r = subprocess.run([sys.executable, attach.__file__, str(tmp_path / "n.hwpx"),
+                        "-o", str(link)], capture_output=True, text=True)
+    assert r.returncode == 1
+    assert victim.read_text(encoding="utf-8") == "소중한 원본"  # 원본 무손상

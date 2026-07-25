@@ -126,6 +126,25 @@ def extract_hwpx(path):
                 return _result(False, reason="hwpx_too_many_entries")
             if sum(i.file_size for i in infos) > MAX_UNCOMPRESSED:
                 return _result(False, reason="hwpx_uncompressed_too_large")
+            # HWPX 진위 확인(Codex #11): 임의 zip에 Contents/section0.xml만 넣은
+            # 위조 첨부를 '정품 HWPX로 완전 추출'로 인정하지 않는다. OWPML 패키지의
+            # 구조 마커를 요구한다 — mimetype(application/hwp+zip) 또는 표준
+            # 컨테이너 파일(version.xml / META-INF/container.xml)이 하나도 없으면
+            # 확인 불가로 fail-closed.
+            names = set(z.namelist())
+            mimetype_ok = False
+            if "mimetype" in names:
+                try:
+                    mimetype_ok = z.read("mimetype").strip() == b"application/hwp+zip"
+                except (KeyError, OSError):
+                    mimetype_ok = False
+                if "mimetype" in names and not mimetype_ok:
+                    return _result(False, reason="hwpx_bad_mimetype")
+            has_marker = (mimetype_ok or "version.xml" in names
+                          or "META-INF/container.xml" in names
+                          or "Contents/content.hpf" in names)
+            if not has_marker:
+                return _result(False, reason="hwpx_unverified_container")
             sections = sorted((n for n in z.namelist()
                                if re.match(r"Contents/section\d+\.xml$", n)),
                               key=_section_no)
@@ -287,6 +306,14 @@ def main():
     ap.add_argument("file")
     ap.add_argument("-o", "--output")
     args = ap.parse_args()
+    # 출력 경로가 심링크면 따라가서 대상 파일을 덮어쓴다(Codex #16) — write_text/
+    # rename이 심링크를 추종하므로, 출력·마커 경로가 심링크면 거부한다(fail-closed).
+    if args.output:
+        for p in (args.output, args.output + ".failed.json"):
+            if os.path.islink(p):
+                print(f"[sole-search] 출력 경로가 심링크 — 거부(대상 덮어쓰기 방지): {p}",
+                      file=sys.stderr)
+                sys.exit(1)
     r = extract(args.file)
     if args.output:
         if r["ok"]:
