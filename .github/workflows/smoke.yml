@@ -3,7 +3,20 @@
 # 소스 사이트의 API/HTML 계약이 조용히 깨지는 걸 조기 감지한다.
 # 각 크롤러를 --max-pages 1 (첫 페이지만)로 실행하는 저부하 스모크 —
 # 전수 크롤 금지, 요청 간 딜레이는 스크립트 기본(0.5s+)을 그대로 쓴다.
-# 실패 시 job 실패가 곧 알림이다 (추가 알림 채널 없음).
+# 계약 파손 시 job 실패가 곧 알림이다 (추가 알림 채널 없음).
+#
+# 단, 네트워크 도달 실패는 계약 파손이 아니다. 러너는 해외 IP라서 일부
+# 한국 공공기관 사이트에 닿지 못한다. 2026-07-27 러너에서 A/B 진단한 결과:
+#   seoulshinbo  urllib FAIL(timeout 30.8s) / curl_cffi FAIL(curl 28, 30.0s)
+#   bizinfo      urllib OK(200) / curl_cffi OK(200)
+# 즉 seoulshinbo 는 TLS 지문 문제가 아니라 TCP 연결 자체가 안 되는
+# 구조적 도달 불가이고(같은 시각 한국 IP 로컬에서는 16건 정상 수집),
+# bizinfo 는 간헐 flake 다. 크롤러의 exit 2 는 이 둘과 "첫 페이지 0건
+# 파싱(진짜 계약 파손)"을 구분하지 않으므로, 모든 라이브 스텝을
+# .github/smoke_step.sh 로 감싼다 — 도달 실패는 1회 재시도 후
+# ::warning:: 으로 강등하고 계약 파손만 job 을 빨갛게 만든다.
+# seoulshinbo 는 러너에서 상시 warning 이 정상이다. 이 소스의 계약 검증은
+# 한국 IP에서 region_crawl.py 를 직접 돌려서 해야 한다.
 name: smoke
 
 on:
@@ -39,34 +52,42 @@ jobs:
           python-version: "3.11"
 
       - name: bizinfo list first page
-        run: python3 $SCRIPTS/sources_crawl.py list -o /tmp/bizinfo.jsonl --max-pages 1
+        run: >
+          bash .github/smoke_step.sh bizinfo
+          python3 $SCRIPTS/sources_crawl.py list -o /tmp/bizinfo.jsonl --max-pages 1
 
       - name: sbiz24 pbanc list first page
         if: ${{ !cancelled() }}
-        run: python3 $SCRIPTS/sbiz_crawl.py list pbanc -o /tmp/sbiz_pbanc.jsonl --max-pages 1
+        run: >
+          bash .github/smoke_step.sh sbiz24-pbanc
+          python3 $SCRIPTS/sbiz_crawl.py list pbanc -o /tmp/sbiz_pbanc.jsonl --max-pages 1
 
       - name: sbiz24 combine list first page
         if: ${{ !cancelled() }}
-        run: python3 $SCRIPTS/sbiz_crawl.py list combine -o /tmp/sbiz_combine.jsonl --max-pages 1
+        run: >
+          bash .github/smoke_step.sh sbiz24-combine
+          python3 $SCRIPTS/sbiz_crawl.py list combine -o /tmp/sbiz_combine.jsonl --max-pages 1
 
       - name: fanfandaero list first page
         if: ${{ !cancelled() }}
-        run: python3 $SCRIPTS/region_crawl.py list fanfan -o /tmp/fanfan.jsonl --max-pages 1
+        run: >
+          bash .github/smoke_step.sh fanfandaero
+          python3 $SCRIPTS/region_crawl.py list fanfan -o /tmp/fanfan.jsonl --max-pages 1
 
+      # 러너(해외 IP)에서 TCP 연결 자체가 안 된다 — 상시 warning 이 정상이다.
+      # 위 헤더 주석의 A/B 진단 결과 참조.
       - name: seoulshinbo list first page
         if: ${{ !cancelled() }}
-        run: python3 $SCRIPTS/region_crawl.py list seoulshinbo -o /tmp/ssb.jsonl --max-pages 1
+        run: >
+          bash .github/smoke_step.sh seoulshinbo
+          python3 $SCRIPTS/region_crawl.py list seoulshinbo -o /tmp/ssb.jsonl --max-pages 1
 
-      - name: gov24 list first page (optional source — exit 4 = key not configured, skip)
+      # 선택 소스 — exit 4 = API 키 미등록이므로 skip 계약으로 통과시킨다.
+      - name: gov24 list first page (optional source)
         if: ${{ !cancelled() }}
         env:
           DATA_GO_KR_API_KEY: ${{ secrets.DATA_GO_KR_API_KEY }}
-        run: |
-          set +e
+          SMOKE_SKIP_RC: "4"
+        run: >
+          bash .github/smoke_step.sh gov24
           python3 $SCRIPTS/gov24_crawl.py list -o /tmp/gov24.jsonl --max-pages 1
-          rc=$?
-          if [ "$rc" = "4" ]; then
-            echo "gov24: API key not configured — optional source, skipping"
-            exit 0
-          fi
-          exit "$rc"
