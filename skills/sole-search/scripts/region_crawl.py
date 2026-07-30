@@ -537,9 +537,23 @@ def extract_body(h, start_pattern):
     if ends:
         seg = seg[:min(ends)]
     text = strip_html(seg)
-    # 조회수·등록일시각 등 변동 라벨 라인은 해시 안정성을 위해 제거
-    lines = [ln for ln in text.splitlines()
-             if ln.strip() and not re.fullmatch(r"\s*(조회수?|등록일|작성일)\s*", ln)]
+    # 조회수·등록일시각 등 변동 라벨과 그 값은 해시 안정성을 위해 제거한다.
+    # DOM 구조가 바뀌어 조회수가 시작부 3줄 밖으로 밀려도 라벨 결속으로만
+    # 제거하며, 본문 깊숙한 독립 숫자는 보존한다.
+    lines = []
+    skip_numeric_after_label = False
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        if re.fullmatch(r"(조회수?|등록일|작성일)", line):
+            skip_numeric_after_label = line.startswith("조회")
+            continue
+        if skip_numeric_after_label and re.fullmatch(r"\d{1,12}", line):
+            skip_numeric_after_label = False
+            continue
+        skip_numeric_after_label = False
+        lines.append(raw_line)
     out = []
     for idx, ln in enumerate(lines):
         if idx < 3 and re.fullmatch(r"\s*\d{1,7}\s*", ln):

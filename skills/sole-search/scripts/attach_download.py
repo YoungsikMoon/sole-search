@@ -272,7 +272,11 @@ def open_validated(url, allowed_hosts, timeout, ua, data=None, robots_allowed=No
             if e.code not in _REDIRECT_CODES:
                 raise
             loc = e.headers.get("Location") if e.headers else None
-            e.close()
+            # Python 3.9의 HTTPError는 테스트 더블이나 body 없는 3xx 응답에서
+            # fp/file이 없을 수 있다. 이때 close()가 KeyError를 내며 원래
+            # 리다이렉트 보안 판정을 가리지 않도록 실제 응답 스트림만 닫는다.
+            if getattr(e, "fp", None) is not None:
+                e.close()
             if not loc:
                 raise RedirectBlocked(f"리다이렉트 Location 없음: {url[:80]}")
             nxt = urllib.parse.urljoin(url, loc)

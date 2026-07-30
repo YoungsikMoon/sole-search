@@ -79,6 +79,46 @@ survey_sources: [sbiz24, sbiz24_combine, bizinfo, fanfandaero]  # 서울이면 +
 **개인정보 최소화**: 세금 체납·대출액·신용점수는 묻지 않는다. 정책자금 후보가 나온 뒤
 "이 요건 해당되세요?"로만 확인하고, 답을 프로필에 저장하지 않는다. 출생연월도 저장하지 않는다.
 
+## 0.5단계 — 조사 범위 명시 선택
+
+실제 수집 전에 범위 계획기를 실행해 사용자 선택과 커버리지 한계를 고정한다. 계획기는
+Python 표준 라이브러리만 사용하고 **네트워크·LLM을 호출하지 않으므로 모델 토큰은 0**이다.
+
+```bash
+# 빠른 확인: 소상공인24만
+python3 "${CLAUDE_PLUGIN_ROOT}/skills/sole-search/scripts/scope_plan.py" \
+    --preset quick -o scope-plan.json
+
+# 특정 출처 하나만
+python3 "${CLAUDE_PLUGIN_ROOT}/skills/sole-search/scripts/scope_plan.py" \
+    --preset focused --source sbiz24 -o scope-plan.json
+
+# 프로필 기반 권장 범위
+python3 "${CLAUDE_PLUGIN_ROOT}/skills/sole-search/scripts/scope_plan.py" \
+    --preset recommended --need loan --need online_sales \
+    --province 서울 -o scope-plan.json
+
+# 사용자가 고른 출처만. 자동 어댑터가 없는 출처는 manual_only로 남는다.
+python3 "${CLAUDE_PLUGIN_ROOT}/skills/sole-search/scripts/scope_plan.py" \
+    --preset custom --source sbiz24 --source work24 -o scope-plan.json
+```
+
+- `quick`: 소상공인24 하나만 빠르게 본다.
+- `focused`: `--source`로 지정한 정확히 한 출처만 본다.
+- `recommended`: 업종·필요·지역·보유 credential에 맞는 등록 출처를 추천한다.
+- `all_registered`: 현재 저장소에 검증된 자동 어댑터 또는 명시된 수동 계약이 있는 출처를
+  전부 계획한다. 후보 출처를 자동으로 승격하지 않는다.
+- `all_known`: 등록 출처와 프로필 확장 후보를 모두 계획하되 후보는 `manual_only`로
+  유지한다. 자동 수집 전체가 아니다.
+- `custom`: 사용자가 지정한 출처만 계획한다. 후보 출처는 선택돼도 수동 확인이다.
+
+`scope-plan.json`의 모든 출처 상태(`selected / omitted_by_user / not_applicable`,
+`ready / manual_only / unavailable_credential`)와 요청 수·시간 추정을 먼저 보여준다.
+보고서에는 `scope_fingerprint`와 "선택 범위 기준" 커버리지를 기록한다. 재조사는 직전과
+fingerprint가 같을 때만 GONE·UNCHANGED 승계를 허용한다. fingerprint가 다르면 출처 제외를
+GONE으로 오판하지 말고 범위 변경으로 표시해 전체 재판정한다. 후보·수동 출처 목록과 등록
+조건은 `references/sources.md`를 따른다.
+
 ## 재조사 (diff 모드)
 
 프로필의 `last_survey_dir`가 있으면 전수 재검토 대신 증분 조사:

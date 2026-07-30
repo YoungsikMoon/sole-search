@@ -115,7 +115,8 @@ def _open_validated(url, timeout):
             if e.code not in (301, 302, 303, 307, 308):
                 raise
             loc = e.headers.get("Location") if e.headers else None
-            e.close()
+            if getattr(e, "fp", None) is not None:
+                e.close()
             if not loc or not _host_ok(urllib.parse.urljoin(url, loc)):
                 raise RedirectBlocked("리다이렉트 대상 불허 — 요청 차단")
             url = urllib.parse.urljoin(url, loc)

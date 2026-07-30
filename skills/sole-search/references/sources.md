@@ -229,3 +229,30 @@ coverage_manifest에 `semas_loan_status: manual`로 기록한다.
 전수 크롤 금지 — `--max-pages`가 걸리면 각 크롤러는 coverage 검증(총건수 대조)을
 생략하고 첫 페이지 파싱 성공만 판정한다(0건 파싱은 여전히 실패). gov24는 선택
 소스라 exit 4(키 미등록)를 skip으로 처리한다. push(main)에는 fixture pytest만 돈다.
+
+## 11. 범위 계획기와 확장 후보
+
+`scripts/scope_plan.py`는 실제 수집 전에 `quick / focused / recommended /
+all_registered / all_known / custom` 범위를 JSON 계약으로 확정한다. 네트워크·LLM 호출은 없고,
+선택·제외·비적용·수동·credential 미등록 상태, 요청 수·시간 추정, 모델 토큰 0,
+안정적인 `scope_fingerprint`를 기록한다. `all_registered`는 이 저장소에 검증된
+어댑터와 등록된 수동 확인처 전체라는 뜻이며 인터넷 전체를 의미하지 않는다.
+
+다음 공식 출처는 프로필에 따라 가치가 있지만 아직 자동 어댑터가 검증되지 않은
+확장 후보다. custom 명시 선택 또는 `all_known` 선택 시에도 **수동 확인만** 하며 자동
+크롤러에 합치지 않는다.
+
+| source id | 출처 | 프로필 트리거 | 현재 상태 |
+|---|---|---|---|
+| `work24` | 고용24 | 교육·고용 | candidate/manual |
+| `wbiz` | 여성기업종합정보포털 | 여성대표 | candidate/manual |
+| `debc` | 장애인기업종합지원센터 | 장애인기업 | candidate/manual |
+| `seis` | 사회적기업 통합사업관리시스템 | 사회적기업 | candidate/manual |
+| `exportvoucher` | 수출바우처 | 수출·온라인판매 | candidate/manual |
+| `astartup` | 농식품창업정보망 | 농식품 | candidate/manual |
+| `touraz` | 관광기업지원센터·Touraz | 관광 | candidate/manual |
+| `kosme` | 중소벤처기업진흥공단 | 정책자금·수출 | candidate/manual |
+| `kibo` | 기술보증기금 | 기술기업 보증 | candidate/manual |
+
+후보 자동화 전에는 공식 URL·운영기관·robots/약관 스냅샷·공개 API/페이지 계약·
+쿼터·중복 키·리다이렉트 및 첨부 경계를 실제 호출 후 픽스처 테스트로 고정한다.

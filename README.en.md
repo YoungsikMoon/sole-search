@@ -54,6 +54,37 @@ See the Korean README for a sample report excerpt, the profile schema, and FAQ.
 
 Korea-only. Reports are written in Korean for shop owners, with bureaucratic terms explained.
 
+## Choose the research scope
+
+Users can run only the sources they need. Before collection, `scope_plan.py` emits an
+execution plan that separates automated, manual, and candidate sources and records a stable
+`scope_fingerprint`. It performs no network, API, or model call, so it uses no tokens or
+external quota.
+
+| Preset | Purpose |
+|---|---|
+| `quick` | Fast pass over Sbiz24 and Bizinfo |
+| `focused` | Exactly one source selected by the user |
+| `recommended` | All automated core sources (default) |
+| `all_registered` | Every registered and verified source |
+| `all_known` | Add policy-loan, guarantee, regional, women-owned, and social-enterprise sources to the plan |
+| `custom` | Only sources named with `--include` |
+
+```bash
+python3 skills/sole-search/scripts/scope_plan.py \
+  --preset recommended --need grant --need facility --need online_sales \
+  --out survey-20260730/scope-plan.json
+
+# Sbiz24 only
+python3 skills/sole-search/scripts/scope_plan.py \
+  --preset custom --source sbiz24 --out /tmp/sole-scope.json
+```
+
+`all_known` also plans round-specific policy loans, regional guarantees/KOREG, Work24,
+women-owned and social-enterprise portals, Export Voucher, tourism support, KOSME, and KIBO.
+Sources without verified automation remain explicitly `manual` or `candidate`. Partial
+collection or a changed scope is never treated as proof that an opportunity disappeared.
+
 ## Coverage & limits
 
 - Automated: Sbiz24 (SEMAS announcements + integrated feed incl. local governments), all

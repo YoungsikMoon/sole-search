@@ -83,6 +83,36 @@ mkdir -p ~/my-shop && cd ~/my-shop && claude
 단, "예비창업", "K-Startup", "R&D 과제", "우리 아이템" 같은 **창업·아이템 기반** 탐색은
 이 스킬이 아니라 [ir-search](https://github.com/djfksjd/ir-search)가 맡는다.
 
+## 조사 범위 선택
+
+사용자가 원하는 범위만 조사할 수 있습니다. `scope_plan.py`는 실제 수집 전에
+자동·수동·후보 소스를 구분한 실행계획과 안정적인 `scope_fingerprint`를 만듭니다.
+네트워크·API·LLM을 호출하지 않으므로 토큰이나 외부 쿼터를 소모하지 않습니다.
+
+| 프리셋 | 용도 |
+|---|---|
+| `quick` | 소상공인24·기업마당 핵심 공고만 빠르게 |
+| `focused` | 사용자가 고른 소스 한 곳만 |
+| `recommended` | 자동화된 핵심 소스 전체(권장) |
+| `all_registered` | 현재 등록·검증된 모든 소스 |
+| `all_known` | 정책자금·보증·지역·여성·사회적기업 등 수동·후보 소스까지 계획 |
+| `custom` | `--include`로 지정한 소스만 선택 |
+
+```bash
+python3 skills/sole-search/scripts/scope_plan.py \
+  --preset recommended --need grant --need facility --need online_sales \
+  --out survey-20260730/scope-plan.json
+
+# 소상공인24만 확인
+python3 skills/sole-search/scripts/scope_plan.py \
+  --preset custom --source sbiz24 --out /tmp/sole-scope.json
+```
+
+`all_known`은 정책자금 회차, 지역신보·KOREG, 고용24, 여성기업종합정보포털,
+사회적기업진흥원, 수출바우처, 관광기업지원센터, 중진공·기보 등도 누락 없이
+계획하지만, 자동 수집이 검증되지 않은 소스는 `manual` 또는 `candidate`로 표시합니다.
+부분 수집이나 범위 변경은 종료 공고로 단정하지 않습니다.
+
 ## 보고서는 이렇게 나온다
 
 `survey-YYYYMMDD/report.md` 예시 (발췌):

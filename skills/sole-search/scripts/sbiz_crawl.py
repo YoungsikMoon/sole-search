@@ -111,7 +111,8 @@ def _open_validated(url, timeout, data=None):
             if e.code not in (301, 302, 303, 307, 308):
                 raise
             loc = e.headers.get("Location") if e.headers else None
-            e.close()
+            if getattr(e, "fp", None) is not None:
+                e.close()
             if not loc:
                 raise RedirectBlocked(f"리다이렉트 Location 없음: {url[:80]}")
             nxt = urllib.parse.urljoin(url, loc)
@@ -453,7 +454,8 @@ def cmd_detail(args):
         return 2
     list_rec = None
     gubun = None  # combine에서만 설정 — merge 시 네임스페이스 결속(A/413↔C/413 오염 방지)
-    if args.source == "sbiz24_combine":
+    source = getattr(args, "source", "sbiz24")
+    if source == "sbiz24_combine":
         # 계약(2026-07-23 실호출 검증): 비PBLN combine 행 중 공단(A)·지방정부(D)는
         # 소진공 pbancSn 네임스페이스를 공유해 POST /api/pbanc/{sn}으로 읽힌다.
         # 대출상품(C, /loanProduct/{sn})은 sn 네임스페이스가 달라 같은 숫자가 다른
@@ -583,7 +585,7 @@ def cmd_detail(args):
     if args.merge_into:
         # 병합 키는 요청 sn 기준 — 응답 ID는 위에서 요청 sn과 일치 검증됨
         merged = merge_detail(args.merge_into, sn, detail["content_hash"],
-                              detail["attachments"], complete, source=args.source,
+                              detail["attachments"], complete, source=source,
                               expected_gubun=gubun)
         if not merged:
             print(f"WARNING: source_id={detail['source_id']} 레코드를 "
